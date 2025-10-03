@@ -2,9 +2,15 @@ import pandas as pd
 import numpy as np
 import os
 import pickle
+import logging
+import itertools
+import random
 
 from scipy.ndimage import gaussian_filter1d
-
+from scipy.interpolate import interp1d
+from sklearn.decomposition import PCA
+from scipy.linalg import qr, svd, inv
+from sklearn.naive_bayes import GaussianNB
 
 ########## PATHS ##########
 
@@ -19,6 +25,7 @@ arena_cm = 20 * 7
 arena_px = (
     arena_cm * px_per_cm
 )  # The borders of the arena are from 0 to 700 on both axis
+bin_size = 10*px_per_cm # Size of the bins for the decoder of position (in pixels)
 well_radius_px = 15 / 2 * px_per_cm  # Radius of the wells in pixels (15 cm diameter)
 strategies = {
     "H2226": {1: "ALLO", 2: "EGO"},
@@ -29,7 +36,7 @@ strategies = {
     "H2222": {1: "EGO", 2: "ALLO"},
     "H2224": {1: "EGO", 2: "ALLO"},
     "H2231": {1: "EGO", 2: "ALLO"},
-    "H2235": {1: "EGO", 2: "ALLO"},
+    "H2235": {1: "EGO", 2: "ALLO"},  # ALLO here is not present
 }
 rats = list(strategies.keys())
 # Define centers of wells
@@ -137,6 +144,79 @@ def load_all_trials_info(phase):
         print("File with all the trials info not found")
         df = None
     return df
+
+
+# Dataframe with raw + trials + firing rates
+def load_df_all_data_firing_rates(rat, phase):
+    """Load the dataframe with all the information I added."""
+
+    path_to_data = (
+        root_dir + "data/" + rat + "_phase" + str(phase) + "_data_with_firing_rates.csv"
+    )
+    try:
+        df = pd.read_csv(path_to_data, low_memory=False)
+    except FileNotFoundError:
+        print("File of rat " + rat + " not found")
+        df = None
+    return df
+
+
+# PCA transformations
+def load_pca_transformations(rat, phase):
+    """Load the dictionary with the PCA transformation of all the experiments of a rat."""
+
+    path_to_data = (
+        root_dir
+        + "dictionaries/"
+        + rat
+        + "_phase"
+        + str(phase)
+        + "_all_experiments_pca_space.pkl"
+    )
+    try:
+        with open(path_to_data, "rb") as f:
+            pca_transformations = pickle.load(f)
+    except FileNotFoundError:
+        print("File with the PCA transformations not found")
+        pca_transformations = None
+    return pca_transformations
+
+
+# Symmetrical trials data
+def load_symmetrical_trials_data(phase):
+    """
+    Load the dictionary with the data of the symmetrical trajectories.
+    'clened' means a file where I manually removed the trials that were not good but were selected automatically.
+    """
+    path_to_data = (
+        root_dir + "dictionaries/phase" + str(phase) + "_symmetrical_trials_data.pkl"
+    )
+    try:
+        with open(path_to_data, "rb") as f:
+            symmetrical_trials_data = pickle.load(f)
+    except FileNotFoundError:
+        print("File with symmetrical trials data not found")
+        symmetrical_trials_data = None
+    return symmetrical_trials_data
+
+
+# CCA correlations
+def load_cca_correlations(phase, n_components):
+    """
+    Load the CCA correlations found on all rats in a phase using n_components for CCA allignment.
+    They are in the form of rat -> symmetrical trials types -> combined trials -> correlations.
+    The combined trials contain all the information of the 2 trials details.
+    """
+
+    path_to_file = root_dir + 'dictionaries/cca_phase'+str(phase)+'_comp'+str(n_components)+'.pkl'
+    try:
+        with open(path_to_file, 'rb') as f:
+            cca_correlations = pickle.load(f)
+    except FileNotFoundError:
+        print('File with the CCA correlations not found')
+        print(path_to_file)
+        cca_correlations = None
+    return cca_correlations
 
 
 ########## CHECKING LOCATION STATUS ##########
@@ -510,6 +590,100 @@ def save_df_all_data_firing_rates(rat, phase):
     return None
 
 
+########## SUMMARY TRIALS ##########
+
+
+def get_summary_trials(phase):
+    # If the files is already saved, skip
+    if os.path.exists(root_dir + "data/phase" + str(phase) + "_all_trials_info.csv"):
+        print(
+            "Trials already found in phase: "
+            + str(phase)
+            + ": "
+            + root_dir
+            + "data/phase"
+            + str(phase + 1)
+            + "_all_trials_info.csv"
+        )
+        return
+    columns = [
+        "Rat",
+        "Strategy",
+        "Session",
+        "Stage",
+        "Combo",
+        "Rewarded_well",
+        "Trial",
+        "Correct_trial",
+    ]
+    new_df = pd.DataFrame(columns=columns)
+
+    for rat in rats:
+        print("...starting to find trials in rat: ", rat)
+        strategy = strategies[rat][phase]
+        try:
+            df = load_df_with_trials(rat, phase)
+            # Get all the sessions
+            sessions = df["Session"].unique()
+            for session in sessions:
+                # Get all the stages
+                stages = df[df["Session"] == session]["Stage"].unique()
+                for stage in stages:
+                    # Get all the trials
+                    trials = df[(df["Session"] == session) & (df["Stage"] == stage)][
+                        "Trial"
+                    ].unique()[1:]
+                    for trial in trials:
+                        # Get the rewarded well
+                        rewarded_well = df[
+                            (df["Session"] == session)
+                            & (df["Stage"] == stage)
+                            & (df["Trial"] == trial)
+                        ]["Rewarded_well"].unique()[0]
+                        # Get the combo (Start box - Rewarded well)
+                        combo = df[
+                            (df["Session"] == session)
+                            & (df["Stage"] == stage)
+                            & (df["Trial"] == trial)
+                        ]["Combo"].unique()[0]
+                        # Get the correctness of the trial
+                        correct_trial = df[
+                            (df["Session"] == session)
+                            & (df["Stage"] == stage)
+                            & (df["Trial"] == trial)
+                        ]["Correct_trial"].unique()[0]
+
+                        ### APPEND ROW TO THE DF ###
+                        new_row = {
+                            "Rat": rat,
+                            "Strategy": strategy,
+                            "Session": session,
+                            "Stage": stage,
+                            "Combo": combo,
+                            "Rewarded_well": rewarded_well,
+                            "Trial": int(trial),
+                            "Correct_trial": int(correct_trial),
+                        }
+                        new_df = pd.concat(
+                            [new_df, pd.DataFrame([new_row])], ignore_index=True
+                        )
+        except:
+            print("Could not find trials in rat: ", rat)
+    path_to_save = root_dir + "data/phase" + str(phase) + "_all_trials_info.csv"
+    new_df.to_csv(path_to_save, index=False)
+    print(new_df.head())
+    print(
+        "\tTrials found and saved in phase: "
+        + str(phase)
+        + ": "
+        + root_dir
+        + "data/phase"
+        + str(phase)
+        + "_all_trials_info.csv"
+    )
+    return
+
+
 ########## SYMMETRICAL TRIALS ##########
 
 
@@ -655,3 +829,830 @@ def save_symmetrical_trials_data(phase):
     with open(path_to_data, "wb") as f:
         pickle.dump(symmetrical_trials_data, f)
     return None
+
+
+########## PCA ###########
+
+
+def transform_pca_space_all_sessions(phase):
+    """
+    Get all the experiments for each rat (session + stage) and apply PCA. Save the resulted matrix for future transformations of single trials (save in rat_all_experiments_pca_space.pkl).
+    We do this to compensate for the small number of active neurons during each trial.
+    """
+
+    # Get information on all the experiments
+    all_trials_info = load_all_trials_info(phase)
+    rats = all_trials_info["Rat"].unique()
+    for rat in rats:
+        if os.path.exists(
+            root_dir
+            + "data/"
+            + rat
+            + "_phase"
+            + str(phase)
+            + "_all_experiments_pca_space.pkl"
+        ):
+            print(
+                "PCA space already exists for phase "
+                + str(phase)
+                + " and rat:"
+                + rat
+                + ", at path: "
+                + root_dir
+                + "data/"
+                + rat
+                + "_phase"
+                + str(phase)
+                + "_all_experiments_pca_space.pkl"
+            )
+            continue
+        all_experiments_pca = {}
+        print("Starting PCA analysis of rat: " + rat)
+        # Load the data from each rat
+        df_rat = load_df_all_data_firing_rates(rat, phase)
+        sessions = all_trials_info[all_trials_info["Rat"] == rat]["Session"].unique()
+        for session in sessions:
+            all_experiments_pca[session] = {}
+            stages = all_trials_info[
+                (all_trials_info["Rat"] == rat)
+                & (all_trials_info["Session"] == session)
+            ]["Stage"].unique()
+            for stage in stages:
+                all_experiments_pca[session][stage] = {}
+                print("...starting session: " + session + " stage: " + stage)
+
+                # Get the firing rates of this experiment
+                sel_df = df_rat[
+                    (df_rat["Session"] == session) & (df_rat["Stage"] == stage)
+                ]
+                sel_df = sel_df[
+                    (sel_df["Trial"] > 0) & (sel_df["Correct_trial"] == 1.0)
+                ]
+                # Get the activity matrix
+                all_neurons_id = [col for col in sel_df if col.startswith(" C")]
+                sel_df = sel_df[all_neurons_id]
+                # Drop neurons that have NaN values
+                sel_df = sel_df.dropna(axis="columns")
+                # Save the remaining neurons for this experiment
+                sel_neurons_id = [col for col in sel_df if col.startswith(" C")]
+                all_experiments_pca[session][stage]["neurons_id"] = sel_neurons_id
+                print(sel_df.shape)
+                # If there are not enough components don't do PCA
+                if sel_df.shape[0] == 0:
+                    print(
+                        "Not enough neurons for PCA in rat: "
+                        + rat
+                        + " session: "
+                        + session
+                        + " stage: "
+                        + stage
+                    )
+                    all_experiments_pca[session][stage]["components"] = 0
+                    all_experiments_pca[session][stage]["firing_rates"] = 0
+                    all_experiments_pca[session][stage]["explained_variance"] = 0
+                    all_experiments_pca[session][stage]["neurons_id"] = 0
+                else:
+                    # Normalize the data between 0 and 1
+                    sel_df = (sel_df - sel_df.min(axis=0)) / (
+                        sel_df.max(axis=0) - sel_df.min(axis=0)
+                    )
+                    # Write 0 for the neurons that are not active
+                    sel_df = sel_df.fillna(0)
+                    # Apply PCA and save the matrix of components
+                    pca = PCA()
+                    pca.fit(sel_df.values)  # samples x features
+                    components = (
+                        pca.components_
+                    )  # features x components (are the same if all components are kept)
+                    all_experiments_pca[session][stage]["components"] = components
+                    all_experiments_pca[session][stage]["firing_rates"] = (
+                        sel_df.values
+                    )  # samples x features
+                    all_experiments_pca[session][stage]["explained_variance"] = (
+                        pca.explained_variance_ratio_
+                    )
+
+        # Save the dictionary
+        path_to_save = (
+            root_dir
+            + "dictionaries/"
+            + rat
+            + "_phase"
+            + str(phase)
+            + "_all_experiments_pca_space.pkl"
+        )
+        with open(path_to_save, "wb") as f:
+            pickle.dump(all_experiments_pca, f)
+        print("...saved the PCA space of all experiments for rat: " + rat)
+
+
+def get_trial_pca_space(
+    phase, trial, symmetrical_trials, rat, symmetrical_trials_type, n_components
+):
+    """For the experiment of the trial load the PCA of it (session + stage) and project the trial on it.
+    INPUTS:
+    - phase: what phase is being analysed (1 or 2)
+    - trial: tuple with the information of the experiment (combo, session, stage, trial)
+    - symmetrical_trials: dictionary with the dataframe of the symmetrical trials
+    - rat: string with the rat name
+    - symmetrical_trials_type: string with the two symmetrical trials
+    - n_components: number of components to keep in the PCA
+    OUTPUTS:
+    - trial_pca: 2D array with the trial projected on the PCA space (samples x components)
+    """
+
+    # Load the trial data
+    _, session, stage, _ = trial
+    trial_df = symmetrical_trials[rat][symmetrical_trials_type][trial]["all_data"]
+    neurons_id = [col for col in trial_df if col.startswith(" C")]
+    trial_fr = trial_df[neurons_id]
+    # Remove the neurons with NaNs values
+    trial_fr = trial_fr.dropna(axis="columns")
+    trial_neurons_id = [col for col in trial_fr if col.startswith(" C")]
+    trial_fr = trial_fr[trial_neurons_id]
+    # Normalize the data between 0 and 1
+    trial_fr = (trial_fr - trial_fr.min(axis=0)) / (
+        trial_fr.max(axis=0) - trial_fr.min(axis=0)
+    )
+    # Write 0 for the neurons that are not active, where the divided was 0
+    trial_fr = trial_fr.fillna(0)
+
+    # Load the PCA space of the experiment
+    all_exp_pca = load_pca_transformations(rat, phase=phase)
+    if isinstance(all_exp_pca[session][stage]["components"], int):
+        print(
+            "No PCA space available for trial: "
+            + str(trial)
+            + " of rat: "
+            + rat
+            + " in phase: "
+            + str(phase)
+        )
+        return None
+    pca_space_components = all_exp_pca[session][stage]["components"]
+    pca_space_mean = all_exp_pca[session][stage]["firing_rates"].mean(axis=0)
+    pca_neurons_id = all_exp_pca[session][stage]["neurons_id"]
+    # Keep only the first n_components
+    pca_space_components = pca_space_components[:n_components]
+
+    # Check that the number of neurons is the same, otherwise trial has to remove the corresponsing mismatching columns
+    if len(trial_neurons_id) > len(pca_neurons_id):
+        trial_fr = trial_fr.values[:, np.isin(trial_neurons_id, pca_neurons_id)]
+    else:
+        # Check that the neurons in the trial are the same as the ones in the PCA space
+        if not np.all(np.array(trial_neurons_id) == np.array(pca_neurons_id)):
+            print(
+                "The neurons in the trial are not the same as the ones in the experiment PCA space"
+            )
+            print("...trial neurons: " + str(trial_neurons_id))
+            print("...pca neurons: " + str(pca_neurons_id))
+            return None
+
+    # Project the trial on the PCA space
+    trial_pca = np.dot(trial_fr - pca_space_mean, pca_space_components.T)
+    return trial_pca
+
+
+########### CONTROL TRIALS ##########
+
+
+def get_random_sample_neural_activity(n_samples, phase, strategy):
+    """Given a lenght of a sample of neural activity, return n_samples random samples of neural activity of the same length from a random animal from a random time window, form SAM or CHO."""
+
+    ### Prepare the data ###
+
+    # Numbers come from observation on the trials used in CCA (see distribution plot)
+    mean_lenght = 53
+    std_lenght = 15
+    n_components = 5  # For the PCA space
+    # For each rat with the right strategy load the rats neural activity, speeds up the process
+    sel_rats = [
+        rat for rat in list(strategies.keys()) if strategies[rat][phase] == strategy
+    ]
+    all_data = {}
+    rats_to_remove = [] # In case some dataframe is None
+    for rat in sel_rats:
+        data = load_df_all_data_firing_rates(rat, phase)
+        if data is None:
+            rats_to_remove.append(rat)
+            continue
+        all_data[rat] = {}
+        all_data[rat]["data"] = data
+        all_data[rat]["pca"] = load_pca_transformations(rat, phase=phase)
+    for rat in rats_to_remove:
+        sel_rats.remove(rat)
+
+    ### Extract samples ###
+    print(
+        "Starting to extract random samples of neural activity from phase "
+        + str(phase)
+        + " and strategy "
+        + strategy
+        + "..."
+    )
+
+    # Save n_samples samples of neural activity
+    neural_samples = []
+    n = 0
+    while n < n_samples:
+        # Choose a random rat + stage + session
+        rat = np.random.choice(sel_rats)
+        sel_df = all_data[rat]["data"]
+        stage = np.random.choice(["SAM", "CHO"])
+        sel_df = sel_df[sel_df["Stage"] == stage]
+        sessions = sel_df["Session"].unique()
+        session = np.random.choice(sessions)
+        sel_df = sel_df[sel_df["Session"] == session]
+        # Get the neural activity of the rat
+        all_neurons_id = [col for col in sel_df if col.startswith(" C")]
+        firing_rates = sel_df[all_neurons_id]
+
+        # Get the PCA space of the rat+stage
+        pca_data = all_data[rat]["pca"]
+        try:
+            pca_space_components = pca_data[session][stage]["components"]
+            pca_space_mean = pca_data[session][stage]["firing_rates"].mean(axis=0)
+            pca_neurons_id = pca_data[session][stage]["neurons_id"]
+            # Keep only the first n_components
+            pca_space_components = pca_space_components[:n_components]
+            # Keep only the neurons that are in the PCA space
+            firing_rates = firing_rates[pca_neurons_id]
+            # Transform to 0s the neurons that have NaNs
+            firing_rates = firing_rates.fillna(0)
+
+            # Get a random time window by estimating the window length from a gaussian distribution
+            length_sample = int(np.random.normal(mean_lenght, std_lenght))
+            start_time = np.random.randint(0, firing_rates.shape[0] - length_sample)
+            firing_rates = firing_rates.iloc[start_time : start_time + length_sample, :]
+            # Normalize the data between 0 and 1
+            firing_rates = (firing_rates - firing_rates.min(axis=0)) / (
+                firing_rates.max(axis=0) - firing_rates.min(axis=0)
+            )
+            # Insert 0 in non active neurons
+            firing_rates = firing_rates.fillna(0).values
+
+            # Project the trial on the PCA space
+            trial_pca = np.dot(firing_rates - pca_space_mean, pca_space_components.T)
+            # Check rank of the matrix
+            if np.linalg.matrix_rank(trial_pca) >= n_components:
+                neural_samples.append(trial_pca)
+                n = n + 1
+                if n % 10 == 0:
+                    print("number of samples taken: " + str(n) + "/" + str(n_samples))
+        except:
+            pass
+    print(
+        "Finished extracting random samples of neural activity-"
+        + str(len(neural_samples))
+    )
+    with open(
+        root_dir + "dictionaries/phase" + str(phase) + "_" + strategy + "_control.pkl",
+        "wb",
+    ) as f:
+        pickle.dump(neural_samples, f)
+    return
+
+
+########### CCA CORRELATIONS ##########
+
+
+def interpolate_dataset(short_dataset, target_length):
+    """Interpolate two datasets to have the same length."""
+    x_old = np.linspace(0, 1, short_dataset.shape[0])
+    x_new = np.linspace(0, 1, target_length)
+    interpolator = interp1d(x_old, short_dataset, axis=0, kind="linear")
+    new_dataset = interpolator(x_new)
+    return new_dataset
+
+
+def canoncorr(X: np.array, Y: np.array, fullReturn: bool = False) -> np.array:
+    """
+    Canonical Correlation Analysis (CCA)
+    line-by-line port from Matlab implementation of `canoncorr`
+    X,Y: (samples/observations) x (features) matrix, for both: X.shape[0] >> X.shape[1]
+    fullReturn: whether all outputs should be returned or just `r` be returned (not in Matlab)
+
+    returns: A,B,r,U,V
+    A,B: Canonical coefficients for X and Y
+    U,V: Canonical scores for the variables X and Y
+    r:   Canonical correlations
+
+    Signature:
+    A,B,r,U,V = canoncorr(X, Y)
+    """
+    n, p1 = X.shape
+    p2 = Y.shape[1]
+    if p1 >= n or p2 >= n:
+        logging.warning("Not enough samples, might cause problems")
+
+    # Center the variables
+    X = X - np.mean(X, 0)
+    Y = Y - np.mean(Y, 0)
+
+    # Factor the inputs, and find a full rank set of columns if necessary
+    Q1, T11, perm1 = qr(X, mode="economic", pivoting=True, check_finite=True)
+
+    rankX = sum(
+        np.abs(np.diagonal(T11))
+        > np.finfo(type((np.abs(T11[0, 0])))).eps * max([n, p1])
+    )
+
+    if rankX == 0:
+        logging.error(f"stats:canoncorr:BadData = X")
+    elif rankX < p1:
+        logging.warning("stats:canoncorr:NotFullRank = X")
+        Q1 = Q1[:, :rankX]
+        T11 = T11[:rankX, :rankX]
+
+    Q2, T22, perm2 = qr(Y, mode="economic", pivoting=True, check_finite=True)
+    rankY = sum(
+        np.abs(np.diagonal(T22))
+        > np.finfo(type((np.abs(T22[0, 0])))).eps * max([n, p2])
+    )
+
+    if rankY == 0:
+        logging.error(f"stats:canoncorr:BadData = Y")
+    elif rankY < p2:
+        logging.warning("stats:canoncorr:NotFullRank = Y")
+        Q2 = Q2[:, :rankY]
+        T22 = T22[:rankY, :rankY]
+
+    # Compute canonical coefficients and canonical correlations.  For rankX >
+    # rankY, the economy-size version ignores the extra columns in L and rows
+    # in D. For rankX < rankY, need to ignore extra columns in M and D
+    # explicitly. Normalize A and B to give U and V unit variance.
+    d = min(rankX, rankY)
+    L, D, M = svd(
+        Q1.T @ Q2, full_matrices=True, check_finite=True, lapack_driver="gesdd"
+    )
+    M = M.T
+
+    if (
+        np.isnan(T11).any()
+        or np.isnan(T22).any()
+        or np.isinf(T11).any()
+        or np.isinf(T22).any()
+    ):
+        logging.error("stats:canoncorr:BadData = X or Y")
+    A = inv(T11) @ L[:, :d] * np.sqrt(n - 1)
+    B = inv(T22) @ M[:, :d] * np.sqrt(n - 1)
+    r = D[:d]
+    # remove roundoff errs
+    r[r >= 1] = 1
+    r[r <= 0] = 0
+
+    if not fullReturn:
+        return r
+
+    ### FROME HERE ###
+    # Put coefficients back to their full size and their correct order
+    # Adaptation from MATLAB: Assign to A the correct size by taking the first elements of A and putting them in the order of perm1
+    stackedA = np.vstack((A, np.zeros((p1 - rankX, d))))
+    newA = np.zeros(stackedA.shape)
+    for stackedA_idx, newA_idx in enumerate(perm1):
+        newA[newA_idx, :] = stackedA[stackedA_idx, :]
+
+    stackedB = np.vstack((B, np.zeros((p2 - rankY, d))))
+    newB = np.zeros(stackedB.shape)
+    for stackedB_idx, newB_idx in enumerate(perm2):
+        newB[newB_idx, :] = stackedB[stackedB_idx, :]
+    ### TO HERE ###
+
+    # Compute the canonical variates
+    U = X @ newA
+    V = Y @ newB
+
+    return newA, newB, r, U, V
+
+
+def calculate_cca_correlations(
+    phase, n_components_pca, n_components_cca
+):
+    """
+    For each rat finds the correlations between the CCA components and save the results.
+    INPUTS:
+    - n_components_pca: number of components to keep in the PCA transformation before the aligning with the CCA
+    - n_components_cca: number of CCA components to keep
+    OUTPUTS:
+    - all_cca_correlations: saved as a .pkl file ?
+    """
+    with open(root_dir+'dictionaries/phase'+str(phase)+'_ALLO_control.pkl', 'rb') as f:
+        allo_controls = pickle.load(f)
+    with open(root_dir+'dictionaries/phase'+str(phase)+'_EGO_control.pkl', 'rb') as f:
+        ego_controls = pickle.load(f)
+
+    all_cca_correlations = {}
+
+    # Load information about symmetrical trials
+    symmetrical_trials = load_symmetrical_trials_data(phase=phase)
+    rats = list(symmetrical_trials.keys())
+    # Work on one rat at the time
+    for rat in rats:
+        print("Starting CCA analysis of rat: " + rat)
+        all_cca_correlations[rat] = {}
+        # Find the pair of trial types to compare
+        symmetrical_trials_types = list(symmetrical_trials[rat].keys())
+        for symmetrical_trials_type in symmetrical_trials_types:
+            print("...looking into symmetrical trials: " + str(symmetrical_trials_type))
+            all_cca_correlations[rat][symmetrical_trials_type] = {}
+            # Details of the single experiments
+            trials = list(symmetrical_trials[rat][symmetrical_trials_type].keys())
+
+            # Do the analysis on the trials
+            combinations_trials = list(itertools.combinations(trials, 2))
+            for combination_trials in combinations_trials:
+                # Get the PCA space of the 2 trials
+                trial_1, trial_2 = combination_trials
+                trial_1_pca = get_trial_pca_space(
+                    phase=phase,
+                    trial=trial_1,
+                    symmetrical_trials=symmetrical_trials,
+                    rat=rat,
+                    symmetrical_trials_type=symmetrical_trials_type,
+                    n_components=n_components_pca,
+                )
+                trial_2_pca = get_trial_pca_space(
+                    phase=phase,
+                    trial=trial_2,
+                    symmetrical_trials=symmetrical_trials,
+                    rat=rat,
+                    symmetrical_trials_type=symmetrical_trials_type,
+                    n_components=n_components_pca,
+                )
+
+                ### Get the CCA correlation between the 2 trials ###
+                if np.any(trial_1_pca == None) | np.any(trial_2_pca == None):
+                    print(
+                        "Error in PCA... skipping this pair of trials because problems in neurons ID: "
+                        + str(trial_1)
+                        + " ---- "
+                        + str(trial_2)
+                    )
+                    continue
+
+                # Extend the shortest trial and shorten the longest one
+                max_len = max(trial_1_pca.shape[0], trial_2_pca.shape[0])
+                min_len = min(trial_1_pca.shape[0], trial_2_pca.shape[0])
+                new_len = int((max_len + min_len) / 2)
+                trial_1_pca = interpolate_dataset(trial_1_pca, new_len)
+                trial_2_pca = interpolate_dataset(trial_2_pca, new_len)
+                # Save the x and y of the trials
+                trial_1_x = symmetrical_trials[rat][symmetrical_trials_type][trial_1][
+                    "x"
+                ]
+                trial_1_y = symmetrical_trials[rat][symmetrical_trials_type][trial_1][
+                    "y"
+                ]
+                trial_2_x = symmetrical_trials[rat][symmetrical_trials_type][trial_2][
+                    "x"
+                ]
+                trial_2_y = symmetrical_trials[rat][symmetrical_trials_type][trial_2][
+                    "y"
+                ]
+                # Save the active neurons in trial 1 and trial 2
+                trial_1_neurons = [
+                    c
+                    for c in symmetrical_trials[rat][symmetrical_trials_type][trial_1][
+                        "all_data"
+                    ]
+                    .dropna(axis=1)
+                    .columns
+                    if c.startswith(" C")
+                ]
+                trial_1_active = np.array(trial_1_neurons)[
+                    (
+                        symmetrical_trials[rat][symmetrical_trials_type][trial_1][
+                            "all_data"
+                        ]
+                        .dropna(axis=1)[trial_1_neurons]
+                        .sum(axis=0)
+                        > 0
+                    ).values
+                ]
+                trial_2_neurons = [
+                    c
+                    for c in symmetrical_trials[rat][symmetrical_trials_type][trial_2][
+                        "all_data"
+                    ]
+                    .dropna(axis=1)
+                    .columns
+                    if c.startswith(" C")
+                ]
+                trial_2_active = np.array(trial_2_neurons)[
+                    (
+                        symmetrical_trials[rat][symmetrical_trials_type][trial_2][
+                            "all_data"
+                        ]
+                        .dropna(axis=1)[trial_2_neurons]
+                        .sum(axis=0)
+                        > 0
+                    ).values
+                ]
+
+                try:
+                    print("Comparing experiments {} ---- {}".format(trial_1, trial_2))
+                    A, B, r, U, V = canoncorr(trial_1_pca, trial_2_pca, fullReturn=True)
+                    print("...CCA number of canonical components: " + str(len(r)))
+                except:
+                    print("Error in CCA")
+                    continue
+
+                # Save the CCA correlation only if n_components were kept
+                if len(r) >= n_components_cca:
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ] = {}
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["r"] = r[:n_components_cca]
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["A"] = A[:, :n_components_cca]
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["B"] = B[:, :n_components_cca]
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["U"] = U[:, :n_components_cca]
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["V"] = V[:, :n_components_cca]
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial1"] = {}
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial2"] = {}
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial1"]["x"] = trial_1_x
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial1"]["y"] = trial_1_y
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial2"]["x"] = trial_2_x
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial2"]["y"] = trial_2_y
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial1"]["all_neurons"] = trial_1_neurons
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial2"]["all_neurons"] = trial_2_neurons
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial1"]["active_neurons"] = trial_1_active
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["trial2"]["active_neurons"] = trial_2_active
+
+            if strategies[rat][phase] == "ALLO":
+                control_samples = allo_controls
+            else:
+                control_samples = ego_controls
+            # Do the analysis on the controls
+            for i, trial in enumerate(trials):
+                print("Control trial: " + str(trial))
+                trial_pca = get_trial_pca_space(
+                    phase=phase,
+                    trial=trial,
+                    symmetrical_trials=symmetrical_trials,
+                    rat=rat,
+                    symmetrical_trials_type=symmetrical_trials_type,
+                    n_components=n_components_pca,
+                )
+                if trial_pca is None:
+                    print(
+                        "Error in PCA... skipping this trial because problems getting the PCA space: "
+                        + str(trial)
+                    )
+                    continue
+                control_done = False
+                counter = 0
+                while (not control_done) and (counter < 10):
+                    counter = counter + 1
+                    print(counter)
+                    control_trial = random.choice(control_samples)
+                    # Extend the shortest trial and shorten the longest one
+                    max_len = max(trial_pca.shape[0], control_trial.shape[0])
+                    min_len = min(trial_pca.shape[0], control_trial.shape[0])
+                    new_len = int((max_len + min_len) / 2)
+                    trial_pca = interpolate_dataset(trial_pca, new_len)
+                    control_trial = interpolate_dataset(control_trial, new_len)
+                    try:
+                        print("Comparing experiments {} ---- control".format(trial))
+                        A, B, r, U, V = canoncorr(
+                            trial_pca, control_trial, fullReturn=True
+                        )
+                        print("...CCA number of canonical components: " + str(len(r)))
+                    except:
+                        print("Error in CCA")
+                        continue
+                    # Save the CCA correlation only if n_components were kept
+                    if len(r) >= n_components_cca:
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ] = {}
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["r"] = r[:n_components_cca]
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["A"] = A[:, :n_components_cca]
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["B"] = B[:, :n_components_cca]
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["U"] = U[:, :n_components_cca]
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["V"] = V[:, :n_components_cca]
+                        control_done = True
+
+    # Save the cca_correlations in .pkl
+    with open(
+        root_dir
+        + "dictionaries/cca_phase"
+        + str(phase)
+        + "_comp"
+        + str(n_components_cca)
+        + ".pkl",
+        "wb",
+    ) as f:
+        pickle.dump(all_cca_correlations, f)
+
+    return None
+
+
+########### DECODING POSITION ###########
+
+
+def get_binned_position(x, y, xdim, ydim, bin_size):
+    '''Get the position of the rat in the binned arena.
+    INPUTS: 
+    x, y = 1D array with position of rat in pixels
+    bin_size = number of pixels for 1 bin
+    xdim, ydim = edges of coordinates x and y in the arena
+    OUTPUTS: 
+    x_bin, y_bin = 
+    x_binned, y_binned = 
+    '''
+
+    # Get size in pixels of the arena
+    dist_x = xdim[0]-xdim[1]
+    dist_y = ydim[0]-ydim[1]
+    # Get number of bins in each dimension
+    n_bins_x = int(dist_x/bin_size)
+    n_bins_y = int(dist_y/bin_size)
+    # Bin the x and y position of the rat
+    x_b = (x/bin_size).astype(int)
+    y_b = (y/bin_size).astype(int)
+    # If some bins accidentally happen to be over the boundary?
+    x_b[x_b>=n_bins_x] = n_bins_x-1
+    y_b[y_b>=n_bins_y] = n_bins_y-1
+    x_b[x_b<0] = 0
+    y_b[y_b<0] = 0
+
+    return x_b, y_b, n_bins_x, n_bins_y
+
+
+def get_decoders_results(phase, n_components_cca):
+
+    # Load files only once
+    cca_results = load_cca_correlations(phase, n_components_cca)
+    symmetrical_trials_info = load_symmetrical_trials_data(phase)
+
+    # Create data structure to save the results
+    results = {}
+
+    # Go through all CCAs results and do the decoder analysis
+    rats = list(cca_results.keys())
+    for rat in rats:
+        print('Rat: '+rat)
+        results[rat] = {}
+        symmetrical_combos = list(cca_results[rat].keys())
+        for symmetrical_combo in symmetrical_combos:
+            results[rat][symmetrical_combo] = {}
+            trials_combinations = list(cca_results[rat][symmetrical_combo].keys())
+            for trials_combination in trials_combinations:
+                results[rat][symmetrical_combo][trials_combination] = {}
+                trial1 = trials_combination[0]
+                trial2 = trials_combination[1]
+                if trial2 != 'control':
+                    combo1, _, _, _ = trial1
+                    combo2, _, _, _ = trial2
+
+                    ### Get CCA results and space ###
+
+                    # Select the trajectories of the 2 trials in the CCA space
+                    trial1_cca_traj = cca_results[rat][symmetrical_combo][trials_combination]['U'] # canonical scores for X (n_timepoints x n_components_cca) transformed X to canonical space
+                    trial2_cca_traj = cca_results[rat][symmetrical_combo][trials_combination]['V'] # canonical scores for Y (n_timepoints x n_components_cca) transformed Y to canonical space
+                    results[rat][symmetrical_combo][trials_combination]['trial1_cca_U'] = trial1_cca_traj
+                    results[rat][symmetrical_combo][trials_combination]['trial2_cca_V'] = trial2_cca_traj
+
+                    ### Get the neural trajectories of the trials selected ###
+
+                    trial1_df = symmetrical_trials_info[rat][symmetrical_combo][trial1]['all_data']
+                    trial2_df = symmetrical_trials_info[rat][symmetrical_combo][trial2]['all_data']
+                    # Get the neurons IDs of the two trials 
+                    trial1_neurons = trial1_df.columns[trial1_df.columns.str.startswith(' C')].values
+                    trial2_neurons = trial2_df.columns[trial2_df.columns.str.startswith(' C')].values
+                    # get the intersection of the neurons
+                    common_neurons = np.intersect1d(trial1_neurons, trial2_neurons)
+                    # get the firing rates of the trials
+                    trial1_firing_rates = trial1_df[common_neurons]
+                    trial1_firing_rates = trial1_firing_rates.fillna(0).values
+                    trial2_firing_rates = trial2_df[common_neurons]
+                    trial2_firing_rates = trial2_firing_rates.fillna(0).values
+                    
+                    # Equalise the number of timepoints
+                    max_len = max(trial1_firing_rates.shape[0], trial2_firing_rates.shape[0])
+                    min_len = min(trial1_firing_rates.shape[0], trial2_firing_rates.shape[0])
+                    new_len = int((max_len+min_len)/2)
+
+                    trial1_firing_rates_ = interpolate_dataset(trial1_firing_rates, new_len)
+                    trial2_firing_rates_ = interpolate_dataset(trial2_firing_rates, new_len)
+                    results[rat][symmetrical_combo][trials_combination]['trial1_firing_rates'] = trial1_firing_rates_
+                    results[rat][symmetrical_combo][trials_combination]['trial2_firing_rates'] = trial2_firing_rates_
+
+                    ### Save also the x,y positions of the trials ###
+                    
+                    trial1_x = trial1_df['Cap_x'].values
+                    trial1_y = trial1_df['Cap_y'].values
+                    trial2_x = trial2_df['Cap_x'].values
+                    trial2_y = trial2_df['Cap_y'].values
+                    # If the trial is symmetrical, the trial2 needs to be inverted
+                    if combo1 != combo2:
+                        trial2_x = arena_px - trial2_x
+                        trial2_y = arena_px - trial2_y
+
+                    # euqalize the number of timepoints
+                    trial1_x = interpolate_dataset(trial1_x, new_len)
+                    trial1_y = interpolate_dataset(trial1_y, new_len)
+                    trial2_x = interpolate_dataset(trial2_x, new_len)
+                    trial2_y = interpolate_dataset(trial2_y, new_len)
+                    # get the binned positions
+                    trial1_xb, trial1_yb, _, _ = get_binned_position(trial1_x, trial1_y, [arena_px,0], [arena_px,0], bin_size)
+                    trial2_xb, trial2_yb, _, _ = get_binned_position(trial2_x, trial2_y, [arena_px,0], [arena_px,0], bin_size)
+                    results[rat][symmetrical_combo][trials_combination]['trial1_xb'] = trial1_xb
+                    results[rat][symmetrical_combo][trials_combination]['trial1_yb'] = trial1_yb
+                    results[rat][symmetrical_combo][trials_combination]['trial2_xb'] = trial2_xb
+                    results[rat][symmetrical_combo][trials_combination]['trial2_yb'] = trial2_yb
+
+                    ### Make a decoder on the first trial and test it on the second trial, both for CCA space and neural space ###
+
+                    # remove the points that have 0 activity in all neurons
+                    activity_trial1_mask = ~np.all(trial1_firing_rates_ == 0, axis=1)
+                    activity_trial2_mask = ~np.all(trial2_firing_rates_ == 0, axis=1)
+                    # remove the neurons that have 0 activity in all points
+                    activity_neurons_mask = (~np.all(trial1_firing_rates_ == 0, axis=0)) | (~np.all(trial2_firing_rates_ == 0, axis=0))
+                    trial1_firing_rates_ = trial1_firing_rates_[:, activity_neurons_mask]
+                    trial2_firing_rates_ = trial2_firing_rates_[:, activity_neurons_mask]
+
+                    ### Start with decoding neural space ###
+
+                    mse1, mse2, chance1, chance2, trial2_pred_x, trial2_pred_y, trial1_pred_x, trial1_pred_y = apply_decoders_gaussianNB(trial1_firing_rates_[activity_trial1_mask], trial1_xb[activity_trial1_mask], trial1_yb[activity_trial1_mask], trial2_firing_rates_[activity_trial2_mask], trial2_xb[activity_trial2_mask], trial2_yb[activity_trial2_mask])
+                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder1_neural_space'] = mse1
+                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder2_neural_space'] = mse2
+                    results[rat][symmetrical_combo][trials_combination]['chance_decoder1_neural_space'] = chance1
+                    results[rat][symmetrical_combo][trials_combination]['chance_decoder2_neural_space'] = chance2
+                    
+                    ### Now decode from CCA space ###
+                    
+                    mse1, mse2, chance1, chance2, trial2_pred_x, trial2_pred_y, trial1_pred_x, trial1_pred_y = apply_decoders_gaussianNB(trial1_cca_traj, trial1_xb, trial1_yb, trial2_cca_traj, trial2_xb, trial2_yb)
+                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder1_cca_space'] = mse1
+                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder2_cca_space'] = mse2
+                    results[rat][symmetrical_combo][trials_combination]['chance_decoder1_cca_space'] = chance1
+                    results[rat][symmetrical_combo][trials_combination]['chance_decoder2_cca_space'] = chance2
+    # save the results
+    path_to_save = root_dir+'dictionaries/phase'+str(phase)+'_decoding_results.pkl'
+    with open(path_to_save, 'wb') as f:
+        pickle.dump(results, f)
+    return
+
+
+def apply_decoders_gaussianNB(X1, Y1_x, Y1_y, X2, Y2_x, Y2_y):
+    """Apply the decoders on the training and test sets."""
+
+    model1_x = GaussianNB()
+    model1_y = GaussianNB()
+    model2_x = GaussianNB()
+    model2_y = GaussianNB()
+
+    model1_x.fit(X1, Y1_x)
+    model1_y.fit(X1, Y1_y)
+    # Get a score weightedby the number of classes in each model
+    score1 = model1_x.score(X2, Y2_x)*len(model1_x.classes_)/(len(model1_x.classes_)+len(model1_y.classes_)) + model1_y.score(X2, Y2_y)*len(model1_y.classes_)/(len(model1_x.classes_)+len(model1_y.classes_))
+    chance1 = (1/len(model1_x.classes_) + 1/len(model1_y.classes_))/2
+    Y2_x_pred, Y2_y_pred = model1_x.predict(X2), model1_y.predict(X2)
+
+    model2_x.fit(X2, Y2_x)
+    model2_y.fit(X2, Y2_y)
+    score2 = model2_x.score(X1, Y1_x)*len(model2_x.classes_)/(len(model2_x.classes_)+len(model2_y.classes_)) + model2_y.score(X1, Y1_y)*len(model2_y.classes_)/(len(model2_x.classes_)+len(model2_y.classes_))
+    chance2 = (1/len(model2_x.classes_) + 1/len(model2_y.classes_))/2
+    Y1_x_pred, Y1_y_pred = model2_x.predict(X1), model2_y.predict(X1)
+
+    return score1, score2, chance1, chance2, Y2_x_pred, Y2_y_pred, Y1_x_pred, Y1_y_pred

@@ -25,7 +25,7 @@ arena_cm = 20 * 7
 arena_px = (
     arena_cm * px_per_cm
 )  # The borders of the arena are from 0 to 700 on both axis
-bin_size = 10*px_per_cm # Size of the bins for the decoder of position (in pixels)
+bin_size = 10 * px_per_cm  # Size of the bins for the decoder of position (in pixels)
 well_radius_px = 15 / 2 * px_per_cm  # Radius of the wells in pixels (15 cm diameter)
 strategies = {
     "H2226": {1: "ALLO", 2: "EGO"},
@@ -208,15 +208,49 @@ def load_cca_correlations(phase, n_components):
     The combined trials contain all the information of the 2 trials details.
     """
 
-    path_to_file = root_dir + 'dictionaries/cca_phase'+str(phase)+'_comp'+str(n_components)+'.pkl'
+    path_to_file = (
+        root_dir
+        + "dictionaries/cca_phase"
+        + str(phase)
+        + "_comp"
+        + str(n_components)
+        + ".pkl"
+    )
     try:
-        with open(path_to_file, 'rb') as f:
+        with open(path_to_file, "rb") as f:
             cca_correlations = pickle.load(f)
     except FileNotFoundError:
-        print('File with the CCA correlations not found')
+        print("File with the CCA correlations not found")
         print(path_to_file)
         cca_correlations = None
     return cca_correlations
+
+
+# Load decoder results
+def load_decoder_results(phase):
+    """Load the results from the decoder."""
+    path_to_results = (
+        root_dir + "dictionaries/phase" + str(phase) + "_decoding_results.pkl"
+    )
+    try:
+        with open(path_to_results, "rb") as f:
+            decoder_results = pickle.load(f)
+    except FileNotFoundError:
+        print("File with the decoder results not found: " + path_to_results)
+        decoder_results = None
+    return decoder_results
+
+
+# Load summery for figures
+def load_summary_figures_data(phase):
+    """Load the summary data for the figures."""
+    path_to_data = root_dir + "dictionaries/phase" + str(phase) + "_figures_data.csv"
+    try:
+        df = pd.read_csv(path_to_data, low_memory=False)
+    except FileNotFoundError:
+        print("File with the summary data for figures not found: " + path_to_data)
+        df = None
+    return df
 
 
 ########## CHECKING LOCATION STATUS ##########
@@ -1030,7 +1064,7 @@ def get_random_sample_neural_activity(n_samples, phase, strategy):
         rat for rat in list(strategies.keys()) if strategies[rat][phase] == strategy
     ]
     all_data = {}
-    rats_to_remove = [] # In case some dataframe is None
+    rats_to_remove = []  # In case some dataframe is None
     for rat in sel_rats:
         data = load_df_all_data_firing_rates(rat, phase)
         if data is None:
@@ -1225,9 +1259,7 @@ def canoncorr(X: np.array, Y: np.array, fullReturn: bool = False) -> np.array:
     return newA, newB, r, U, V
 
 
-def calculate_cca_correlations(
-    phase, n_components_pca, n_components_cca
-):
+def calculate_cca_correlations(phase, n_components_pca, n_components_cca):
     """
     For each rat finds the correlations between the CCA components and save the results.
     INPUTS:
@@ -1236,9 +1268,13 @@ def calculate_cca_correlations(
     OUTPUTS:
     - all_cca_correlations: saved as a .pkl file ?
     """
-    with open(root_dir+'dictionaries/phase'+str(phase)+'_ALLO_control.pkl', 'rb') as f:
+    with open(
+        root_dir + "dictionaries/phase" + str(phase) + "_ALLO_control.pkl", "rb"
+    ) as f:
         allo_controls = pickle.load(f)
-    with open(root_dir+'dictionaries/phase'+str(phase)+'_EGO_control.pkl', 'rb') as f:
+    with open(
+        root_dir + "dictionaries/phase" + str(phase) + "_EGO_control.pkl", "rb"
+    ) as f:
         ego_controls = pickle.load(f)
 
     all_cca_correlations = {}
@@ -1491,36 +1527,35 @@ def calculate_cca_correlations(
 
 
 def get_binned_position(x, y, xdim, ydim, bin_size):
-    '''Get the position of the rat in the binned arena.
-    INPUTS: 
+    """Get the position of the rat in the binned arena.
+    INPUTS:
     x, y = 1D array with position of rat in pixels
     bin_size = number of pixels for 1 bin
     xdim, ydim = edges of coordinates x and y in the arena
-    OUTPUTS: 
-    x_bin, y_bin = 
-    x_binned, y_binned = 
-    '''
+    OUTPUTS:
+    x_bin, y_bin =
+    x_binned, y_binned =
+    """
 
     # Get size in pixels of the arena
-    dist_x = xdim[0]-xdim[1]
-    dist_y = ydim[0]-ydim[1]
+    dist_x = xdim[0] - xdim[1]
+    dist_y = ydim[0] - ydim[1]
     # Get number of bins in each dimension
-    n_bins_x = int(dist_x/bin_size)
-    n_bins_y = int(dist_y/bin_size)
+    n_bins_x = int(dist_x / bin_size)
+    n_bins_y = int(dist_y / bin_size)
     # Bin the x and y position of the rat
-    x_b = (x/bin_size).astype(int)
-    y_b = (y/bin_size).astype(int)
+    x_b = (x / bin_size).astype(int)
+    y_b = (y / bin_size).astype(int)
     # If some bins accidentally happen to be over the boundary?
-    x_b[x_b>=n_bins_x] = n_bins_x-1
-    y_b[y_b>=n_bins_y] = n_bins_y-1
-    x_b[x_b<0] = 0
-    y_b[y_b<0] = 0
+    x_b[x_b >= n_bins_x] = n_bins_x - 1
+    y_b[y_b >= n_bins_y] = n_bins_y - 1
+    x_b[x_b < 0] = 0
+    y_b[y_b < 0] = 0
 
     return x_b, y_b, n_bins_x, n_bins_y
 
 
 def get_decoders_results(phase, n_components_cca):
-
     # Load files only once
     cca_results = load_cca_correlations(phase, n_components_cca)
     symmetrical_trials_info = load_symmetrical_trials_data(phase)
@@ -1531,7 +1566,7 @@ def get_decoders_results(phase, n_components_cca):
     # Go through all CCAs results and do the decoder analysis
     rats = list(cca_results.keys())
     for rat in rats:
-        print('Rat: '+rat)
+        print("Rat: " + rat)
         results[rat] = {}
         symmetrical_combos = list(cca_results[rat].keys())
         for symmetrical_combo in symmetrical_combos:
@@ -1541,25 +1576,53 @@ def get_decoders_results(phase, n_components_cca):
                 results[rat][symmetrical_combo][trials_combination] = {}
                 trial1 = trials_combination[0]
                 trial2 = trials_combination[1]
-                if trial2 != 'control':
+                if trial2 != "control":
                     combo1, _, _, _ = trial1
                     combo2, _, _, _ = trial2
 
                     ### Get CCA results and space ###
 
                     # Select the trajectories of the 2 trials in the CCA space
-                    trial1_cca_traj = cca_results[rat][symmetrical_combo][trials_combination]['U'] # canonical scores for X (n_timepoints x n_components_cca) transformed X to canonical space
-                    trial2_cca_traj = cca_results[rat][symmetrical_combo][trials_combination]['V'] # canonical scores for Y (n_timepoints x n_components_cca) transformed Y to canonical space
-                    results[rat][symmetrical_combo][trials_combination]['trial1_cca_U'] = trial1_cca_traj
-                    results[rat][symmetrical_combo][trials_combination]['trial2_cca_V'] = trial2_cca_traj
+                    trial1_cca_traj = cca_results[
+                        rat
+                    ][
+                        symmetrical_combo
+                    ][
+                        trials_combination
+                    ][
+                        "U"
+                    ]  # canonical scores for X (n_timepoints x n_components_cca) transformed X to canonical space
+                    trial2_cca_traj = cca_results[
+                        rat
+                    ][
+                        symmetrical_combo
+                    ][
+                        trials_combination
+                    ][
+                        "V"
+                    ]  # canonical scores for Y (n_timepoints x n_components_cca) transformed Y to canonical space
+                    results[rat][symmetrical_combo][trials_combination][
+                        "trial1_cca_U"
+                    ] = trial1_cca_traj
+                    results[rat][symmetrical_combo][trials_combination][
+                        "trial2_cca_V"
+                    ] = trial2_cca_traj
 
                     ### Get the neural trajectories of the trials selected ###
 
-                    trial1_df = symmetrical_trials_info[rat][symmetrical_combo][trial1]['all_data']
-                    trial2_df = symmetrical_trials_info[rat][symmetrical_combo][trial2]['all_data']
-                    # Get the neurons IDs of the two trials 
-                    trial1_neurons = trial1_df.columns[trial1_df.columns.str.startswith(' C')].values
-                    trial2_neurons = trial2_df.columns[trial2_df.columns.str.startswith(' C')].values
+                    trial1_df = symmetrical_trials_info[rat][symmetrical_combo][trial1][
+                        "all_data"
+                    ]
+                    trial2_df = symmetrical_trials_info[rat][symmetrical_combo][trial2][
+                        "all_data"
+                    ]
+                    # Get the neurons IDs of the two trials
+                    trial1_neurons = trial1_df.columns[
+                        trial1_df.columns.str.startswith(" C")
+                    ].values
+                    trial2_neurons = trial2_df.columns[
+                        trial2_df.columns.str.startswith(" C")
+                    ].values
                     # get the intersection of the neurons
                     common_neurons = np.intersect1d(trial1_neurons, trial2_neurons)
                     # get the firing rates of the trials
@@ -1567,23 +1630,35 @@ def get_decoders_results(phase, n_components_cca):
                     trial1_firing_rates = trial1_firing_rates.fillna(0).values
                     trial2_firing_rates = trial2_df[common_neurons]
                     trial2_firing_rates = trial2_firing_rates.fillna(0).values
-                    
-                    # Equalise the number of timepoints
-                    max_len = max(trial1_firing_rates.shape[0], trial2_firing_rates.shape[0])
-                    min_len = min(trial1_firing_rates.shape[0], trial2_firing_rates.shape[0])
-                    new_len = int((max_len+min_len)/2)
 
-                    trial1_firing_rates_ = interpolate_dataset(trial1_firing_rates, new_len)
-                    trial2_firing_rates_ = interpolate_dataset(trial2_firing_rates, new_len)
-                    results[rat][symmetrical_combo][trials_combination]['trial1_firing_rates'] = trial1_firing_rates_
-                    results[rat][symmetrical_combo][trials_combination]['trial2_firing_rates'] = trial2_firing_rates_
+                    # Equalise the number of timepoints
+                    max_len = max(
+                        trial1_firing_rates.shape[0], trial2_firing_rates.shape[0]
+                    )
+                    min_len = min(
+                        trial1_firing_rates.shape[0], trial2_firing_rates.shape[0]
+                    )
+                    new_len = int((max_len + min_len) / 2)
+
+                    trial1_firing_rates_ = interpolate_dataset(
+                        trial1_firing_rates, new_len
+                    )
+                    trial2_firing_rates_ = interpolate_dataset(
+                        trial2_firing_rates, new_len
+                    )
+                    results[rat][symmetrical_combo][trials_combination][
+                        "trial1_firing_rates"
+                    ] = trial1_firing_rates_
+                    results[rat][symmetrical_combo][trials_combination][
+                        "trial2_firing_rates"
+                    ] = trial2_firing_rates_
 
                     ### Save also the x,y positions of the trials ###
-                    
-                    trial1_x = trial1_df['Cap_x'].values
-                    trial1_y = trial1_df['Cap_y'].values
-                    trial2_x = trial2_df['Cap_x'].values
-                    trial2_y = trial2_df['Cap_y'].values
+
+                    trial1_x = trial1_df["Cap_x"].values
+                    trial1_y = trial1_df["Cap_y"].values
+                    trial2_x = trial2_df["Cap_x"].values
+                    trial2_y = trial2_df["Cap_y"].values
                     # If the trial is symmetrical, the trial2 needs to be inverted
                     if combo1 != combo2:
                         trial2_x = arena_px - trial2_x
@@ -1594,13 +1669,25 @@ def get_decoders_results(phase, n_components_cca):
                     trial1_y = interpolate_dataset(trial1_y, new_len)
                     trial2_x = interpolate_dataset(trial2_x, new_len)
                     trial2_y = interpolate_dataset(trial2_y, new_len)
-                    # get the binned positions
-                    trial1_xb, trial1_yb, _, _ = get_binned_position(trial1_x, trial1_y, [arena_px,0], [arena_px,0], bin_size)
-                    trial2_xb, trial2_yb, _, _ = get_binned_position(trial2_x, trial2_y, [arena_px,0], [arena_px,0], bin_size)
-                    results[rat][symmetrical_combo][trials_combination]['trial1_xb'] = trial1_xb
-                    results[rat][symmetrical_combo][trials_combination]['trial1_yb'] = trial1_yb
-                    results[rat][symmetrical_combo][trials_combination]['trial2_xb'] = trial2_xb
-                    results[rat][symmetrical_combo][trials_combination]['trial2_yb'] = trial2_yb
+                    # get the binned positions
+                    trial1_xb, trial1_yb, _, _ = get_binned_position(
+                        trial1_x, trial1_y, [arena_px, 0], [arena_px, 0], bin_size
+                    )
+                    trial2_xb, trial2_yb, _, _ = get_binned_position(
+                        trial2_x, trial2_y, [arena_px, 0], [arena_px, 0], bin_size
+                    )
+                    results[rat][symmetrical_combo][trials_combination]["trial1_xb"] = (
+                        trial1_xb
+                    )
+                    results[rat][symmetrical_combo][trials_combination]["trial1_yb"] = (
+                        trial1_yb
+                    )
+                    results[rat][symmetrical_combo][trials_combination]["trial2_xb"] = (
+                        trial2_xb
+                    )
+                    results[rat][symmetrical_combo][trials_combination]["trial2_yb"] = (
+                        trial2_yb
+                    )
 
                     ### Make a decoder on the first trial and test it on the second trial, both for CCA space and neural space ###
 
@@ -1608,28 +1695,84 @@ def get_decoders_results(phase, n_components_cca):
                     activity_trial1_mask = ~np.all(trial1_firing_rates_ == 0, axis=1)
                     activity_trial2_mask = ~np.all(trial2_firing_rates_ == 0, axis=1)
                     # remove the neurons that have 0 activity in all points
-                    activity_neurons_mask = (~np.all(trial1_firing_rates_ == 0, axis=0)) | (~np.all(trial2_firing_rates_ == 0, axis=0))
-                    trial1_firing_rates_ = trial1_firing_rates_[:, activity_neurons_mask]
-                    trial2_firing_rates_ = trial2_firing_rates_[:, activity_neurons_mask]
+                    activity_neurons_mask = (
+                        ~np.all(trial1_firing_rates_ == 0, axis=0)
+                    ) | (~np.all(trial2_firing_rates_ == 0, axis=0))
+                    trial1_firing_rates_ = trial1_firing_rates_[
+                        :, activity_neurons_mask
+                    ]
+                    trial2_firing_rates_ = trial2_firing_rates_[
+                        :, activity_neurons_mask
+                    ]
 
                     ### Start with decoding neural space ###
 
-                    mse1, mse2, chance1, chance2, trial2_pred_x, trial2_pred_y, trial1_pred_x, trial1_pred_y = apply_decoders_gaussianNB(trial1_firing_rates_[activity_trial1_mask], trial1_xb[activity_trial1_mask], trial1_yb[activity_trial1_mask], trial2_firing_rates_[activity_trial2_mask], trial2_xb[activity_trial2_mask], trial2_yb[activity_trial2_mask])
-                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder1_neural_space'] = mse1
-                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder2_neural_space'] = mse2
-                    results[rat][symmetrical_combo][trials_combination]['chance_decoder1_neural_space'] = chance1
-                    results[rat][symmetrical_combo][trials_combination]['chance_decoder2_neural_space'] = chance2
-                    
+                    (
+                        mse1,
+                        mse2,
+                        chance1,
+                        chance2,
+                        trial2_pred_x,
+                        trial2_pred_y,
+                        trial1_pred_x,
+                        trial1_pred_y,
+                    ) = apply_decoders_gaussianNB(
+                        trial1_firing_rates_[activity_trial1_mask],
+                        trial1_xb[activity_trial1_mask],
+                        trial1_yb[activity_trial1_mask],
+                        trial2_firing_rates_[activity_trial2_mask],
+                        trial2_xb[activity_trial2_mask],
+                        trial2_yb[activity_trial2_mask],
+                    )
+                    results[rat][symmetrical_combo][trials_combination][
+                        "accuracy_decoder1_neural_space"
+                    ] = mse1
+                    results[rat][symmetrical_combo][trials_combination][
+                        "accuracy_decoder2_neural_space"
+                    ] = mse2
+                    results[rat][symmetrical_combo][trials_combination][
+                        "chance_decoder1_neural_space"
+                    ] = chance1
+                    results[rat][symmetrical_combo][trials_combination][
+                        "chance_decoder2_neural_space"
+                    ] = chance2
+
                     ### Now decode from CCA space ###
-                    
-                    mse1, mse2, chance1, chance2, trial2_pred_x, trial2_pred_y, trial1_pred_x, trial1_pred_y = apply_decoders_gaussianNB(trial1_cca_traj, trial1_xb, trial1_yb, trial2_cca_traj, trial2_xb, trial2_yb)
-                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder1_cca_space'] = mse1
-                    results[rat][symmetrical_combo][trials_combination]['accuracy_decoder2_cca_space'] = mse2
-                    results[rat][symmetrical_combo][trials_combination]['chance_decoder1_cca_space'] = chance1
-                    results[rat][symmetrical_combo][trials_combination]['chance_decoder2_cca_space'] = chance2
+
+                    (
+                        mse1,
+                        mse2,
+                        chance1,
+                        chance2,
+                        trial2_pred_x,
+                        trial2_pred_y,
+                        trial1_pred_x,
+                        trial1_pred_y,
+                    ) = apply_decoders_gaussianNB(
+                        trial1_cca_traj,
+                        trial1_xb,
+                        trial1_yb,
+                        trial2_cca_traj,
+                        trial2_xb,
+                        trial2_yb,
+                    )
+                    results[rat][symmetrical_combo][trials_combination][
+                        "accuracy_decoder1_cca_space"
+                    ] = mse1
+                    results[rat][symmetrical_combo][trials_combination][
+                        "accuracy_decoder2_cca_space"
+                    ] = mse2
+                    results[rat][symmetrical_combo][trials_combination][
+                        "chance_decoder1_cca_space"
+                    ] = chance1
+                    results[rat][symmetrical_combo][trials_combination][
+                        "chance_decoder2_cca_space"
+                    ] = chance2
     # save the results
-    path_to_save = root_dir+'dictionaries/phase'+str(phase)+'_decoding_results.pkl'
-    with open(path_to_save, 'wb') as f:
+    path_to_save = (
+        root_dir + "dictionaries/phase" + str(phase) + "_decoding_results.pkl"
+    )
+    with open(path_to_save, "wb") as f:
         pickle.dump(results, f)
     return
 
@@ -1644,15 +1787,527 @@ def apply_decoders_gaussianNB(X1, Y1_x, Y1_y, X2, Y2_x, Y2_y):
 
     model1_x.fit(X1, Y1_x)
     model1_y.fit(X1, Y1_y)
-    # Get a score weightedby the number of classes in each model
-    score1 = model1_x.score(X2, Y2_x)*len(model1_x.classes_)/(len(model1_x.classes_)+len(model1_y.classes_)) + model1_y.score(X2, Y2_y)*len(model1_y.classes_)/(len(model1_x.classes_)+len(model1_y.classes_))
-    chance1 = (1/len(model1_x.classes_) + 1/len(model1_y.classes_))/2
+    # Get a score weightedby the number of classes in each model
+    score1 = model1_x.score(X2, Y2_x) * len(model1_x.classes_) / (
+        len(model1_x.classes_) + len(model1_y.classes_)
+    ) + model1_y.score(X2, Y2_y) * len(model1_y.classes_) / (
+        len(model1_x.classes_) + len(model1_y.classes_)
+    )
+    chance1 = (1 / len(model1_x.classes_) + 1 / len(model1_y.classes_)) / 2
     Y2_x_pred, Y2_y_pred = model1_x.predict(X2), model1_y.predict(X2)
 
     model2_x.fit(X2, Y2_x)
     model2_y.fit(X2, Y2_y)
-    score2 = model2_x.score(X1, Y1_x)*len(model2_x.classes_)/(len(model2_x.classes_)+len(model2_y.classes_)) + model2_y.score(X1, Y1_y)*len(model2_y.classes_)/(len(model2_x.classes_)+len(model2_y.classes_))
-    chance2 = (1/len(model2_x.classes_) + 1/len(model2_y.classes_))/2
+    score2 = model2_x.score(X1, Y1_x) * len(model2_x.classes_) / (
+        len(model2_x.classes_) + len(model2_y.classes_)
+    ) + model2_y.score(X1, Y1_y) * len(model2_y.classes_) / (
+        len(model2_x.classes_) + len(model2_y.classes_)
+    )
+    chance2 = (1 / len(model2_x.classes_) + 1 / len(model2_y.classes_)) / 2
     Y1_x_pred, Y1_y_pred = model2_x.predict(X1), model2_y.predict(X1)
 
     return score1, score2, chance1, chance2, Y2_x_pred, Y2_y_pred, Y1_x_pred, Y1_y_pred
+
+
+########### SUMMARY RESULTS ###########
+
+
+def make_summary_results(phase):
+    """
+    Puts the result in a convinient dictiornary for plotting later.
+    """
+    summary_results = {}
+    cca_results = load_cca_correlations(
+        phase=phase, n_components=5
+    )  # TODO: what if I use only 2 ?
+    decoder_results = load_decoder_results(phase=phase)
+    rats = list(cca_results.keys())
+    for rat in rats:
+        # Set up the variables to save
+        summary_results[rat] = {}
+        cca_pairs = []
+        same_or_symm_type = []
+        symmetrical_combo = []
+        strategy = []
+        acc_neural_space = []
+        acc_cca_space = []
+        chance_neural_space = []
+        chance_cca_space = []
+        distance_2d_trajectories = []
+        correlation_2d_trajectories = []
+        perc_active_neurons = []  # percentage of neurons that are active between the two trials vs the total number of active neurons (to proove that neural similarity is not to matching neurons but topology)
+
+        symmetrical_types = list(cca_results[rat].keys())
+        for symmetrical_type in symmetrical_types:
+            pairs_trials = list(cca_results[rat][symmetrical_type].keys())
+            for pair_trials in pairs_trials:
+                # Define trials information
+                trial_1, trial_2 = pair_trials
+                # Get CCA correlations
+                corr = cca_results[rat][symmetrical_type][pair_trials]["r"]
+                cca_pairs.append(np.array(corr).mean())
+                if trial_2 != "control":
+                    trial_combo_1, _, _, _ = trial_1
+                    trial_combo_2, _, _, _ = trial_2
+
+                    # Get the average sme for of the two decoders
+                    acc_neural_space_avg = np.round(
+                        (
+                            decoder_results[rat][symmetrical_type][pair_trials][
+                                "accuracy_decoder1_neural_space"
+                            ]
+                            + decoder_results[rat][symmetrical_type][pair_trials][
+                                "accuracy_decoder2_neural_space"
+                            ]
+                        )
+                        / 2,
+                        3,
+                    )
+                    acc_cca_space_avg = np.round(
+                        (
+                            decoder_results[rat][symmetrical_type][pair_trials][
+                                "accuracy_decoder1_cca_space"
+                            ]
+                            + decoder_results[rat][symmetrical_type][pair_trials][
+                                "accuracy_decoder2_cca_space"
+                            ]
+                        )
+                        / 2,
+                        3,
+                    )
+                    chance_neural_space_avg = np.round(
+                        (
+                            decoder_results[rat][symmetrical_type][pair_trials][
+                                "chance_decoder1_neural_space"
+                            ]
+                            + decoder_results[rat][symmetrical_type][pair_trials][
+                                "chance_decoder2_neural_space"
+                            ]
+                        )
+                        / 2,
+                        3,
+                    )
+                    chance_cca_space_avg = np.round(
+                        (
+                            decoder_results[rat][symmetrical_type][pair_trials][
+                                "chance_decoder1_cca_space"
+                            ]
+                            + decoder_results[rat][symmetrical_type][pair_trials][
+                                "chance_decoder2_cca_space"
+                            ]
+                        )
+                        / 2,
+                        3,
+                    )
+                    acc_neural_space.append(acc_neural_space_avg)
+                    acc_cca_space.append(acc_cca_space_avg)
+                    chance_neural_space.append(chance_neural_space_avg)
+                    chance_cca_space.append(chance_cca_space_avg)
+
+                    # Get the distance between the trajectories
+                    t1_x = cca_results[rat][symmetrical_type][pair_trials]["trial1"][
+                        "x"
+                    ]
+                    t1_y = cca_results[rat][symmetrical_type][pair_trials]["trial1"][
+                        "y"
+                    ]
+                    t2_x = cca_results[rat][symmetrical_type][pair_trials]["trial2"][
+                        "x"
+                    ]
+                    t2_y = cca_results[rat][symmetrical_type][pair_trials]["trial2"][
+                        "y"
+                    ]
+                    # Make the trials the same lenght
+                    max_len = max(len(t1_x), len(t2_x))
+                    min_len = min(len(t1_x), len(t2_x))
+                    new_len = int((max_len + min_len) / 2)
+                    t1_x = interpolate_dataset(t1_x, new_len)
+                    t1_y = interpolate_dataset(t1_y, new_len)
+                    t2_x = interpolate_dataset(t2_x, new_len)
+                    t2_y = interpolate_dataset(t2_y, new_len)
+                    # Get the distance
+                    distance_2d_trajectories.append(
+                        np.mean(np.sqrt((t1_x - t2_x) ** 2 + (t1_y - t2_y) ** 2))
+                    )
+                    # Get the correlation between the trajectories
+                    correlation_2d_trajectories.append(
+                        (np.corrcoef(t1_x, t2_x)[0, 1] + np.corrcoef(t1_y, t2_y)[0, 1])
+                        / 2
+                    )
+
+                    # Get percentage of active neurons
+                    shared_neurons = np.intersect1d(
+                        cca_results[rat][symmetrical_type][pair_trials]["trial1"][
+                            "active_neurons"
+                        ],
+                        cca_results[rat][symmetrical_type][pair_trials]["trial2"][
+                            "active_neurons"
+                        ],
+                    )
+                    total_neurons = np.union1d(
+                        cca_results[rat][symmetrical_type][pair_trials]["trial1"][
+                            "active_neurons"
+                        ],
+                        cca_results[rat][symmetrical_type][pair_trials]["trial2"][
+                            "active_neurons"
+                        ],
+                    )
+                    perc_active_neurons.append(
+                        float(len(shared_neurons)) / float(len(total_neurons))
+                    )
+
+                    # Get the type of pair
+                    if trial_combo_1 == trial_combo_2:
+                        same_or_symm_type.append("Same-type")
+                    else:
+                        same_or_symm_type.append("Symmetrical-type")
+                else:
+                    same_or_symm_type.append("Control")
+                    acc_neural_space.append(np.nan)
+                    acc_cca_space.append(np.nan)
+                    chance_neural_space.append(np.nan)
+                    chance_cca_space.append(np.nan)
+                    distance_2d_trajectories.append(np.nan)
+                    correlation_2d_trajectories.append(np.nan)
+                    perc_active_neurons.append(np.nan)
+
+                # Save the symmetrical combo
+                symmetrical_combo.append(symmetrical_type)
+                # Save the strategy of the animal
+                strategy.append(strategies[rat][phase])
+
+        # Save the results
+        summary_results[rat]["cca"] = cca_pairs
+        summary_results[rat]["pair-type"] = same_or_symm_type
+        summary_results[rat]["symm_combo"] = symmetrical_combo
+        summary_results[rat]["strategy"] = strategy
+        summary_results[rat]["acc_neural_space"] = acc_neural_space
+        summary_results[rat]["chance_neural_space"] = chance_neural_space
+        summary_results[rat]["acc_cca_space"] = acc_cca_space
+        summary_results[rat]["chance_cca_space"] = chance_cca_space
+        summary_results[rat]["distance_2d_trajectories"] = distance_2d_trajectories
+        summary_results[rat]["correlation_2d_trajectories"] = (
+            correlation_2d_trajectories
+        )
+        summary_results[rat]["perc_active_neurons"] = perc_active_neurons
+
+    return summary_results
+
+
+def save_figures_data(summary_results, phase):
+    """Save the data for all the figures in a csv file."""
+
+    animal_csv = []
+    strategy_csv = []
+    cca_csv = []
+    same_or_symm_csv = []
+    pair_of_combos_csv = []
+    sme_neural_csv = []
+    chance_neural_csv = []
+    sme_cca_csv = []
+    chance_cca_csv = []
+    distance_2d_trajectories_csv = []
+    correlation_2d_trajectories_csv = []
+    perc_active_neurons_csv = []
+
+    rats = list(summary_results.keys())
+    for rat in rats:
+        # Go through all the saved results for each rat and save them in a dataframe
+        for idx in range(len(summary_results[rat]["cca"])):
+            # Save the values to add to this line
+            animal_csv.append(rat)
+            strategy_csv.append(strategies[rat][phase])
+            cca_csv.append(summary_results[rat]["cca"][idx])
+            same_or_symm_csv.append(summary_results[rat]["pair-type"][idx])
+            pair_of_combos_csv.append(summary_results[rat]["symm_combo"][idx])
+            sme_neural_csv.append(summary_results[rat]["acc_neural_space"][idx])
+            chance_neural_csv.append(summary_results[rat]["chance_neural_space"][idx])
+            sme_cca_csv.append(summary_results[rat]["acc_cca_space"][idx])
+            chance_cca_csv.append(summary_results[rat]["chance_cca_space"][idx])
+            distance_2d_trajectories_csv.append(
+                summary_results[rat]["distance_2d_trajectories"][idx]
+            )
+            correlation_2d_trajectories_csv.append(
+                summary_results[rat]["correlation_2d_trajectories"][idx]
+            )
+            perc_active_neurons_csv.append(
+                summary_results[rat]["perc_active_neurons"][idx]
+            )
+
+    # Create the dataframe
+    final_df = pd.DataFrame(
+        {
+            "Animal": animal_csv,
+            "Strategy": strategy_csv,
+            "CCA_correlation": cca_csv,
+            "Same_or_symm": same_or_symm_csv,
+            "Accuracy_neural_space": sme_neural_csv,
+            "Chance_neural_space": chance_neural_csv,
+            "Accuracy_cca_space": sme_cca_csv,
+            "Chance_cca_space": chance_cca_csv,
+            "Pair_of_combos": pair_of_combos_csv,
+            "Distance_2d_trajectories": distance_2d_trajectories_csv,
+            "Correlation_2d_trajectories": correlation_2d_trajectories_csv,
+            "Perc_active_neurons": perc_active_neurons_csv,
+        }
+    )
+
+    # Save df
+    final_df.to_csv(root_dir + "dictionaries/phase" + str(phase) + "_figures_data.csv")
+    return None
+
+
+############ PLOTTING FUNCTIONS ###########
+
+
+def plot_violin_with_points(
+    ax,
+    data_groups,
+    title="",
+    ylabel="",
+    xlim=None,
+    ylim=None,
+    show_violin=True,
+    show_points=True,
+    show_mean=True,
+    show_errorbar=True,
+    violin_alpha=0.3,
+    point_alpha=0.4,
+    point_size=15,
+    mean_size=80,
+    jitter_strength=0.05,
+    errorbar_capsize=5,
+    violin_bandwidth=None,
+    violin_resolution=50,
+):
+    """
+    Create violin plot with individual points, animal averages, and error bars.
+    Data selection and preparation should be done in the notebook.
+
+    Parameters:
+    -----------
+    ax : matplotlib axes
+        The axes to plot on
+    data_groups : list of dict
+        List of data groups, each dict MUST contain:
+        - 'data': pandas.Series or array-like with individual data points
+        - 'animal_ids': pandas.Series or array-like with animal identifiers (same length as data)
+        - 'position': float, x-position for this group
+        - 'color': str, color for this group
+        - 'label': str, label for this group (used for x-axis ticks)
+    title : str, optional
+        Plot title
+    ylabel : str, optional
+        Y-axis label
+    xlim : tuple, optional
+        X-axis limits (min, max)
+    ylim : tuple, optional
+        Y-axis limits (min, max)
+    show_violin : bool, optional
+        Whether to show violin density plot
+    show_points : bool, optional
+        Whether to show individual data points
+    show_mean : bool, optional
+        Whether to show animal means
+    show_errorbar : bool, optional
+        Whether to show error bars (SEM)
+    violin_alpha : float, optional
+        Transparency for violin plot
+    point_alpha : float, optional
+        Transparency for individual points
+    point_size : int, optional
+        Size of individual points
+    mean_size : int, optional
+        Size of animal mean points
+    jitter_strength : float, optional
+        Amount of horizontal jitter for points
+    errorbar_capsize : int, optional
+        Size of error bar caps
+    violin_bandwidth : float, optional
+        Bandwidth for violin smoothing (None for automatic). Lower values = less smooth
+    violin_resolution : int, optional
+        Number of points to use for violin curve (default: 50)
+
+    Returns:
+    --------
+    dict : Dictionary containing plotted elements for further customization
+    """
+
+    plot_elements = {"points": [], "means": [], "errorbars": [], "violins": [], "medians": []}
+    x_positions = []
+    x_labels = []
+
+    for group in data_groups:
+        # Extract required group data (no defaults, all must be provided)
+        data = group["data"]
+        animal_ids = group["animal_ids"]
+        position = group["position"]
+        color = group["color"]
+        label = group["label"]
+
+        # Remove NaN values
+        mask = ~pd.isna(data)
+        data_clean = data[mask]
+        animal_ids_clean = animal_ids[mask]
+
+        if len(data_clean) == 0:
+            continue
+
+        x_positions.append(position)
+        x_labels.append(label)
+
+        # Calculate animal means and percentiles from individual data points
+        animal_data = pd.DataFrame({"data": data_clean, "animal": animal_ids_clean})
+        animal_means = animal_data.groupby("animal")["data"].mean()
+        group_mean = animal_means.mean()
+        
+        # Calculate percentiles from ALL individual data points (not just animal means)
+        data_q25 = np.percentile(data_clean, 25)  # 25th percentile of all individual points
+        data_q75 = np.percentile(data_clean, 75)  # 75th percentile of all individual points
+
+        # 1. Plot violin (density) if requested using matplotlib's violinplot (seaborn-style)
+        if show_violin and len(data_clean) > 1:
+            # Create matplotlib violin plot with custom smoothing controls
+            if violin_bandwidth is not None:
+                # Use custom KDE implementation with controlled bandwidth
+                from scipy.stats import gaussian_kde
+                
+                # Create KDE with custom bandwidth
+                kde = gaussian_kde(data_clean)
+                kde.set_bandwidth(violin_bandwidth)
+                
+                # Generate violin shape
+                y_range = np.linspace(data_clean.min(), data_clean.max(), violin_resolution)
+                kde_values = kde(y_range)
+                kde_values = kde_values / np.max(kde_values) * 0.15  # normalize width
+                
+                # Plot symmetric violin
+                violin = ax.fill_betweenx(
+                    y_range,
+                    position - kde_values,
+                    position + kde_values,
+                    color=color,
+                    alpha=violin_alpha,
+                    edgecolor='white',
+                    linewidth=0.8,
+                    zorder=1,
+                )
+                plot_elements["violins"].append(violin)
+            else:
+                # Use matplotlib's default violinplot
+                violin_parts = ax.violinplot(
+                    [data_clean],
+                    positions=[position],
+                    widths=0.3,
+                    showmeans=True,
+                    showextrema=False,
+                    showmedians=False,
+                )
+
+                # Style the violin to match seaborn aesthetics
+                for pc in violin_parts["bodies"]:
+                    pc.set_facecolor(color)
+                    pc.set_alpha(violin_alpha)
+                    pc.set_edgecolor("white")
+                    pc.set_linewidth(0.8)
+                    # Make violin symmetric and smooth like seaborn
+                    pc.set_linestyle("-")
+                
+                plot_elements["violins"].append(violin_parts)
+
+        # 2. Plot individual points with jitter if requested
+        if show_points:
+            x_jitter = position + jitter_strength * np.random.randn(len(data_clean))
+            points = ax.scatter(
+                x_jitter,
+                data_clean,
+                alpha=point_alpha,
+                s=point_size,
+                color=color,
+                zorder=3,
+            )
+            plot_elements["points"].append(points)
+
+        # 3. Plot error bars (25th and 75th percentiles of individual data points)
+        if show_errorbar and len(data_clean) > 1:  # Need at least 2 data points for percentiles
+            # Use median as center point for percentile error bars (more robust)
+            data_median = np.median(data_clean)
+            
+            # Calculate asymmetric error bars: distance from median to percentiles
+            lower_err = data_median - data_q25
+            upper_err = data_q75 - data_median
+            
+            # Ensure error values are non-negative (safety check)
+            lower_err = max(0, lower_err)
+            upper_err = max(0, upper_err)
+            
+            errorbar = ax.errorbar(
+                position,
+                data_median,  # Use median as center point
+                yerr=[[lower_err], [upper_err]],  # Asymmetric error bars
+                fmt="none",
+                color="black",
+                capsize=errorbar_capsize,
+                capthick=1.5,
+                linewidth=2,
+                alpha=0.8,
+                zorder=4,
+            )
+            plot_elements["errorbars"].append(errorbar)
+            
+            # Add a visible median line/marker
+            median_line = ax.plot(
+                [position - 0.15, position + 0.15],  # Short horizontal line
+                [data_median, data_median],
+                color='black',
+                linewidth=3,
+                alpha=1.0,
+                zorder=6,  # Above error bars
+            )
+            plot_elements["medians"].append(median_line)
+
+        # 4. Plot animal means as larger points
+        if show_mean:
+            # Add small jitter to animal means for visibility
+            x_means = position + jitter_strength * 1 * np.random.randn(
+                len(animal_means)
+            )
+            means = ax.scatter(
+                x_means,
+                animal_means.values,
+                s=mean_size,
+                color=color,
+                edgecolors="black",
+                linewidths=1.5,
+                alpha=0.9,
+                zorder=5,
+            )
+            plot_elements["means"].append(means)
+
+    # Set up axes using labels from data groups with seaborn-like styling
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(x_labels, fontsize=10)
+
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
+    # Apply seaborn-like styling
+    ax.set_title(title, fontsize=12, pad=15, fontweight="normal")
+    ax.set_ylabel(ylabel, fontsize=11)
+
+    # Seaborn-style grid and spines
+    ax.grid(True, alpha=0.3, zorder=0, color="white", linewidth=1.2)
+    ax.set_facecolor('white')  # Light grey background like seaborn
+
+    # Remove top and right spines, style remaining ones
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1)
+    ax.spines["bottom"].set_linewidth(1)
+
+    # Style ticks
+    #ax.tick_params(colors="grey", which="both")
+
+    return plot_elements

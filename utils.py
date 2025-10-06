@@ -353,7 +353,7 @@ def add_trials_to_df(df, experiments, df_idx):
     n_trials = np.sum(df["Time(s)"] == 0.0)
     df.insert(5, "Trial", np.zeros(len(df)))
     df.insert(6, "Correct_trial", np.zeros(len(df)))
-    try:  # TODO: delete this, just to see still get a dataset saved
+    try: 
         # indexs from which to start looking for trials
         time_beginning = df.index[df["Time(s)"] == 0.0].to_numpy()
         time_beginning = time_beginning - time_beginning[0]
@@ -520,7 +520,6 @@ def add_locations_to_df(df):
 
         ### CHECK IF GOES OUTSIDE ARENA ###
         # if it is, write 'outside' and the trial is not correct
-        # TODO: Could put a + some pixels for the borders
         elif x < 0 or x > arena_px or y < 0 or y > arena_px:
             locations = apply_tollerance_window(
                 locations, "outside", rewarded_well=rewarded_well
@@ -1444,6 +1443,16 @@ def calculate_cca_correlations(phase, n_components_pca, n_components_cca):
                         combination_trials
                     ]["trial2"]["active_neurons"] = trial_2_active
 
+                    # Save the variance explained by the first 5 components
+                    var_U = np.var(U, axis=0)
+                    var_V = np.var(V, axis=0)
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["var_U"] = var_U
+                    all_cca_correlations[rat][symmetrical_trials_type][
+                        combination_trials
+                    ]["var_V"] = var_V
+
             if strategies[rat][phase] == "ALLO":
                 control_samples = allo_controls
             else:
@@ -1507,6 +1516,12 @@ def calculate_cca_correlations(phase, n_components_pca, n_components_cca):
                             (trial, "control")
                         ]["V"] = V[:, :n_components_cca]
                         control_done = True
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["var_U"] = np.var(U, axis=0)
+                        all_cca_correlations[rat][symmetrical_trials_type][
+                            (trial, "control")
+                        ]["var_V"] = np.var(V, axis=0)
 
     # Save the cca_correlations in .pkl
     with open(
@@ -1819,7 +1834,7 @@ def make_summary_results(phase):
     summary_results = {}
     cca_results = load_cca_correlations(
         phase=phase, n_components=5
-    )  # TODO: what if I use only 2 ?
+    )
     decoder_results = load_decoder_results(phase=phase)
     rats = list(cca_results.keys())
     for rat in rats:
@@ -1834,8 +1849,11 @@ def make_summary_results(phase):
         chance_neural_space = []
         chance_cca_space = []
         distance_2d_trajectories = []
+        length_2d_trajectories = []
         correlation_2d_trajectories = []
         perc_active_neurons = []  # percentage of neurons that are active between the two trials vs the total number of active neurons (to proove that neural similarity is not to matching neurons but topology)
+        number_of_active_neurons = [] # the mean between the two trials
+        explained_variance_mean_two_trials = [] # mean between the two trials' explained variance by the first 5 CCA components
 
         symmetrical_types = list(cca_results[rat].keys())
         for symmetrical_type in symmetrical_types:
@@ -1928,14 +1946,19 @@ def make_summary_results(phase):
                     # Get the distance
                     distance_2d_trajectories.append(
                         np.mean(np.sqrt((t1_x - t2_x) ** 2 + (t1_y - t2_y) ** 2))
-                    )
+                    ) 
+                    # Normalise it by the lenght of the trial
+                    distance_2d_trajectories[-1] = distance_2d_trajectories[-1] / new_len
                     # Get the correlation between the trajectories
                     correlation_2d_trajectories.append(
                         (np.corrcoef(t1_x, t2_x)[0, 1] + np.corrcoef(t1_y, t2_y)[0, 1])
                         / 2
                     )
 
-                    # Get percentage of active neurons
+                    # Save the length of the trajectories
+                    length_2d_trajectories.append(new_len)
+
+                    # Get percentage of shared active neurons
                     shared_neurons = np.intersect1d(
                         cca_results[rat][symmetrical_type][pair_trials]["trial1"][
                             "active_neurons"
@@ -1956,6 +1979,24 @@ def make_summary_results(phase):
                         float(len(shared_neurons)) / float(len(total_neurons))
                     )
 
+                    # Get the number of active neurons (mean between the two trials)
+                    number_of_active_neurons.append(
+                        np.mean([
+                            len(cca_results[rat][symmetrical_type][pair_trials]["trial1"]["active_neurons"]),
+                            len(cca_results[rat][symmetrical_type][pair_trials]["trial2"]["active_neurons"])
+                        ])
+                    )
+
+                    # Get the explained variance by the first 5 CCA components (mean between the two trials)
+                    var_U = cca_results[rat][symmetrical_type][pair_trials]["var_U"]
+                    var_V = cca_results[rat][symmetrical_type][pair_trials]["var_V"]
+                    explained_variance_mean_two_trials.append(
+                        np.mean([
+                            np.sum(var_U[:5]) / np.sum(var_U),
+                            np.sum(var_V[:5]) / np.sum(var_V)
+                        ])
+                    )
+
                     # Get the type of pair
                     if trial_combo_1 == trial_combo_2:
                         same_or_symm_type.append("Same-type")
@@ -1968,8 +2009,11 @@ def make_summary_results(phase):
                     chance_neural_space.append(np.nan)
                     chance_cca_space.append(np.nan)
                     distance_2d_trajectories.append(np.nan)
+                    length_2d_trajectories.append(np.nan)
                     correlation_2d_trajectories.append(np.nan)
                     perc_active_neurons.append(np.nan)
+                    number_of_active_neurons.append(np.nan)
+                    explained_variance_mean_two_trials.append(np.nan)
 
                 # Save the symmetrical combo
                 symmetrical_combo.append(symmetrical_type)
@@ -1986,10 +2030,13 @@ def make_summary_results(phase):
         summary_results[rat]["acc_cca_space"] = acc_cca_space
         summary_results[rat]["chance_cca_space"] = chance_cca_space
         summary_results[rat]["distance_2d_trajectories"] = distance_2d_trajectories
+        summary_results[rat]["length_2d_trajectories"] = length_2d_trajectories
         summary_results[rat]["correlation_2d_trajectories"] = (
             correlation_2d_trajectories
         )
         summary_results[rat]["perc_active_neurons"] = perc_active_neurons
+        summary_results[rat]["number_of_active_neurons"] = number_of_active_neurons
+        summary_results[rat]["explained_variance_mean_two_trials"] = explained_variance_mean_two_trials
 
     return summary_results
 
@@ -2007,8 +2054,11 @@ def save_figures_data(summary_results, phase):
     sme_cca_csv = []
     chance_cca_csv = []
     distance_2d_trajectories_csv = []
+    length_2d_trajectories_csv = []
     correlation_2d_trajectories_csv = []
     perc_active_neurons_csv = []
+    number_of_active_neurons_csv = []
+    explained_variance_mean_two_trials_csv = []
 
     rats = list(summary_results.keys())
     for rat in rats:
@@ -2027,11 +2077,20 @@ def save_figures_data(summary_results, phase):
             distance_2d_trajectories_csv.append(
                 summary_results[rat]["distance_2d_trajectories"][idx]
             )
+            length_2d_trajectories_csv.append(
+                summary_results[rat]["length_2d_trajectories"][idx] / px_per_cm
+            )
             correlation_2d_trajectories_csv.append(
                 summary_results[rat]["correlation_2d_trajectories"][idx]
             )
             perc_active_neurons_csv.append(
                 summary_results[rat]["perc_active_neurons"][idx]
+            )
+            number_of_active_neurons_csv.append(
+                summary_results[rat]["number_of_active_neurons"][idx]
+            )
+            explained_variance_mean_two_trials_csv.append(
+                summary_results[rat]["explained_variance_mean_two_trials"][idx]
             )
 
     # Create the dataframe
@@ -2047,8 +2106,11 @@ def save_figures_data(summary_results, phase):
             "Chance_cca_space": chance_cca_csv,
             "Pair_of_combos": pair_of_combos_csv,
             "Distance_2d_trajectories": distance_2d_trajectories_csv,
+            "Length_2d_trajectories": length_2d_trajectories_csv,
             "Correlation_2d_trajectories": correlation_2d_trajectories_csv,
             "Perc_active_neurons": perc_active_neurons_csv,
+            "Number_of_active_neurons": number_of_active_neurons_csv,
+            "Explained_variance_mean_two_trials": explained_variance_mean_two_trials_csv,
         }
     )
 
@@ -2310,4 +2372,6 @@ def plot_violin_with_points(
     # Style ticks
     #ax.tick_params(colors="grey", which="both")
 
-    return plot_elements
+    # Return plot_elements for advanced users who need access to the plot objects
+    # (but don't return by default to avoid cluttering Jupyter output)
+    return None
